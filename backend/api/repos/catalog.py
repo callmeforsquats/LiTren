@@ -1,3 +1,5 @@
+from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
+
 from api.core.exceptions import AlreadExistsError, NotFoundError
 from api.schemas.catalog import (
     AuthorCreate,
@@ -19,7 +21,6 @@ from api.schemas.catalog import (
     TopicCreate,
     TopicRead,
 )
-from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
 
 
 class CatalogRepo:
@@ -27,10 +28,15 @@ class CatalogRepo:
         self.pool = pool
 
     async def get_books(self, filter: BookFilter) -> list[BookRead]:
-        print(filter.search is not None)
+        cat_path = None
+        if filter.cat_id is not None:
+            async with self.pool.acquire() as conn:
+                cat_path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", filter.cat_id)
+
         query = """--sql
         SELECT b.id, b.title, b.price, b.picture_url, b.mean_rating, b.reviews_count
-        FROM books b WHERE TRUE
+        FROM books b LEFT JOIN cats c ON b.cat_id = c.id 
+        WHERE TRUE
         """
         params = []
 
@@ -40,7 +46,16 @@ class CatalogRepo:
                 params.append(value)
                 query += f" AND {sql.replace('?', f'${len(params)}')} "
 
-        add_condition("b.cat_id = ?", filter.cat_id)
+        if filter.cat_id is not None:
+            cat_path = None
+            async with self.pool.acquire() as conn:
+                cat_path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", filter.cat_id)
+            if cat_path:
+                params.extend([filter.cat_id, cat_path + "%"])
+                query += f" AND (b.cat_id = ${len(params) - 1} OR c.path ILIKE ${len(params)})"
+            else:
+                add_condition("b.cat_id = ?", filter.cat_id)
+
         add_condition("b.price >= ?", filter.min_price)
         add_condition("b.price <= ?", filter.max_price)
         add_condition("b.is_new = ?", filter.is_new)
@@ -49,14 +64,14 @@ class CatalogRepo:
         add_condition("b.binding = ANY(?::varchar[])", filter.bindings)
         add_condition(
             """--sql 
-            (SELECT array_arg(topic_id) FROM book_topics
+            (SELECT array_agg(topic_id) FROM book_topics
             WHERE book_id = b.id) %% ?::int[] 
             """,
             filter.topic_ids,
         )
         add_condition(
             """--sql 
-            (SELECT array_arg(author_id) FROM book_authors 
+            (SELECT array_agg(author_id) FROM book_authors 
             WHERE book_id = b.id) %% ?::int[] 
             """,
             filter.author_ids,
@@ -72,6 +87,7 @@ class CatalogRepo:
         query += f" ORDER BY {sort} {direction} LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
         params.extend([filter.limit, filter.offset])
         print(query)
+        print(params[1])
 
         async with self.pool.acquire() as con:
             rows = await con.fetch(query, *params)
@@ -279,17 +295,23 @@ class CatalogRepo:
 
     async def get_topics(self, cat_id: int | None = None) -> list[TopicRead]:
         async with self.pool.acquire() as conn:
-            res = None
-            if cat_id is not None:
-                res = await conn.fetch(
-                    """--sql
-                    SELECT t.id, t.name FROM topics t
-                    JOIN cat_topics ct ON t.id = ct.topic_id WHERE ct.cat_id = $1""",
-                    cat_id,
-                )
+            if cat_id is None:
+                res = await conn.fetch("SELECT t.* from topics t")
+                return [TopicRead(**dict(row)) for row in res]
             else:
-                res = await conn.fetch("SELECT t.id, t.name FROM topics t")
-            return [TopicRead(**dict(row)) for row in res]
+                query = """--sql
+                SELECT DISTINCT t.id, t.name FROM topics t
+                JOIN cat_topics ct ON t.id = ct.topic_id
+                JOIN cats c on ct.cat_id = c.id
+                WHERE c.id = $1
+                """
+                path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", cat_id)
+                if path:
+                    query += "OR c.path LIKE $2"
+                    res = await conn.fetch(query, cat_id, path + "%")
+                else:
+                    res = await conn.fetch(query, cat_id)
+                return [TopicRead(**dict(row)) for row in res]
 
     async def link_topic(self, topic_id: int, cat_id: int):
         query = """--sql
@@ -309,14 +331,6 @@ class CatalogRepo:
             await conn.execute(
                 "DELETE FROM cat_topics WHERE topic_id = $1 and cat_id = $2", topic_id, cat_id
             )
-
-    async def get_topics_by_cat_id(self, cat_id: int) -> list[TopicRead]:
-        query = (
-            "SELECT t.* FROM topics t JOIN cat_topics ct ON ct.topic_id = t.id WHERE ct.cat_id = $1"
-        )
-        async with self.pool.acquire() as conn:
-            res = await conn.execute(query, cat_id)
-            return [TopicRead(dict(row)) for row in res]
 
     async def create_cat(self, cat: CatCreate) -> int:
         query = """--sql

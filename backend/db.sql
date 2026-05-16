@@ -25,8 +25,11 @@ CREATE TABLE IF NOT EXISTS topics(
 CREATE TABLE IF NOT EXISTS cats(
     id serial PRIMARY KEY,
     name varchar(255) UNIQUE NOT NULL,
-    parent_id int REFERENCES cats(id) ON DELETE CASCADE
+    parent_id int REFERENCES cats(id) ON DELETE CASCADE,
+    path varchar(100)
 );
+
+CREATE INDEX IF NOT EXISTS cat_path_index ON cats(path);
 
 -- ПЕРЕПЛЁТЫ --
 CREATE TABLE IF NOT EXISTS bindings(
@@ -260,4 +263,46 @@ CREATE TRIGGER trg_refresh_popularity
     mean_rating ON books
     FOR EACH ROW
     EXECUTE PROCEDURE update_popularity_score();
+
+-- 5. ПОСТРОЕНИЕ ПУТИ ДЛЯ КАТЕГОРИИ
+CREATE OR REPLACE FUNCTION build_cat_path()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    temp_path text;
+BEGIN
+    IF NEW.parent_id IS NULL THEN
+        UPDATE
+            cats
+        SET
+            path = NEW.id::varchar
+        WHERE
+            id = NEW.id;
+    ELSE
+        SELECT
+            path
+        INTO
+            temp_path
+        FROM
+            cats
+        WHERE
+            cats.id = NEW.parent_id;
+        UPDATE
+            cats
+        SET
+            path = temp_path || '/' || NEW.id::varchar
+        WHERE
+            id = NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_build_cat_path ON cats;
+
+CREATE TRIGGER trg_build_cat_path
+    AFTER INSERT ON cats
+    FOR EACH ROW
+    EXECUTE PROCEDURE build_cat_path();
 

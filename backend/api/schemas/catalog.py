@@ -23,6 +23,7 @@ class CatCreate(BaseModel):
 
 class CatRead(CatCreate):
     id: int
+    path: str | None = None
 
 
 # ------- Authors ---------
@@ -114,7 +115,7 @@ class BookRead(BaseModel):
 class BookInfo(BookRead, BookBase):
     publisher: PubRead | None = None
     authors: list[AuthorRead] | None = None
-    category: CatRead | None = None
+    cat: CatRead | None = None
     topics: list[TopicRead] | None = None
 
 

@@ -93,6 +93,39 @@ CREATE TRIGGER trg_refresh_popularity
     FOR EACH ROW
     EXECUTE PROCEDURE update_popularity_score();
 
+CREATE OR REPLACE FUNCTION build_cat_path()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    cat_path varchar;
+BEGIN
+    IF NEW.parent_id IS NULL THEN
+        NEW.path := text(nextval(pg_get_serial_sequence('cats', 'id')));
+        NEW.id = integer(NEW.path)
+    ELSE
+        SELECT
+            path
+        INTO
+            cat_path
+        FROM
+            cats
+        WHERE
+            cats.id = NEW.parent_id;
+        NEW.id = nextval(pg_get_serial_sequence('cats', 'id'));
+        NEW.path := cat_path || '/' || text(NEW.id)
+    END IF;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_build_cat_path ON cats;
+
+CREATE TRIGGER trg_build_cat_path
+    BEFORE INSERT ON cats
+    FOR EACH ROW
+    EXECUTE PROCEDURE build_cat_path();
+
 -- -- 5. АВТО-РАСЧЕТ СУММЫ ЗАКАЗА
 -- CREATE OR REPLACE FUNCTION calculate_order_total()
 --     RETURNS TRIGGER
