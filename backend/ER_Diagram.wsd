@@ -1,0 +1,155 @@
+@startuml
+
+
+entity "Users" as users {
+  * id : INT <<PK>>
+  ---
+  email : VARCHAR
+  password_hash : VARCHAR
+  picture_url: VARCHAR
+}
+
+entity "Orders" as orders {
+  * id : INT <<PK>>
+  --
+  user_id : INT <<FK>>
+  total_price : DECIMAL
+  status : VARCHAR
+  delivery_settelment_id: INT <<FK>>
+  delivery_address: TEXT
+}
+
+entity "Carts" as carts {
+  * id : INT <<PK>>
+  --
+  session_id : VARCHAR
+  user_id : INT <<FK>>
+}
+
+entity "Reviews" as reviews {
+ * id : INT <<PK>>
+ --
+ text: VARCHAR
+ rating : INT
+}
+
+entity "Cart_Items" as ci {
+  * id : INT <<PK>>
+  --
+  cart_id : INT <<FK>>
+  book_id : INT <<FK>>
+  quantity : INT
+}
+
+entity "Order_Items" as oi {
+  order_id : INT <<FK>>
+  book_id : INT <<FK>>
+  price_at_purchase : DECIMAL
+  quantity : INT
+}
+
+entity "Books" as books {
+  * id : INT <<PK>>
+  ---
+  title : VARCHAR
+  price : DECIMAL
+  isbn : VARCHAR
+  page_count : INT
+  binding_type : VARCHAR
+  is_bestseller : BOOLEAN
+  mean_rating: DECIMAL
+  is_new : BOOLEAN
+  reviews_count: INT
+  views_count: INT
+  sales_count: INT
+  popularity_score: DECIMAL
+  picture_url: VARCHAR
+  category_id : INT <<FK>>
+  publisher_id : INT <<FK>>
+}
+
+entity "Tags" as tags {
+  * id : INT <<PK>>
+  --
+  name : VARCHAR
+  picture_url: VARCHAR
+}
+
+entity "Categories" as cats {
+  * id : INT <<PK>>
+  --
+  name : VARCHAR
+  parent_id : INT <<FK>>
+  picture_url: VARCHAR
+}
+
+entity "Authors" as authors {
+  * id : INT <<PK>>
+  --
+  name : VARCHAR
+  bio : TEXT
+  picture_url: VARCHAR
+}
+
+entity "Publishers" as pubs {
+  * id : INT <<PK>>
+  --
+  name : VARCHAR
+  info : TEXT
+  picture_url: VARCHAR
+}
+
+entity "Settlments" as stmt{
+  * id : INT <<PK>>
+  --
+  fias_id : UUID
+  type: VARCHAR
+  name: VARCHAR
+  full_name: VARCHAR
+}
+
+entity "Streets" as streets {
+  *id : INT <<PK>>
+  --
+  settlment_id: INT <<FK>>
+  fias_id: UUID
+  street_type: VARCHAR
+  name: VARCHAR
+  full_name: VARCHAR
+}
+
+entity "Addresses" as addr{
+  *id : INT <<PK>>
+  --
+  user_id: INT <<FK>>
+  settelment_id: INT <<FK>>
+  street_id: INT <<FK>>
+  house: VARCHAR
+  flat: VARCHAR
+  fias_id: UUID
+  full_address: TEXT
+
+}
+
+users ||--o| carts
+users ||--o{ orders
+users ||--o{ reviews
+carts ||--|{ ci
+ci }o--|| books
+orders ||--|{ oi
+oi ||--|{ books
+books ||--|{authors : "Через books_authors"
+books }o--|| cats
+books }o--|| pubs
+books ||--o{ reviews
+cats ||--o{ cats : "вложенность"
+cats }o--o{ tags : "через cats_tags"
+tags }o--o{ books : "через books_tags"
+stmt ||-up-o{ streets
+stmt ||--o{ orders
+streets ||-left-o{ addr
+addr }|-right-|| users
+
+
+
+@enduml
