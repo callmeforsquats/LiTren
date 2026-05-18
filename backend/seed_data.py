@@ -117,9 +117,13 @@ async def full_seed():
             ]
 
             # 5. Переплеты
+            binding_ids = []
             bindings_data = ["Твёрдый (7БЦ)", "Мягкий (КБС)", "Кожаный", "Интегральный"]
             for name in bindings_data:
-                await conn.execute("INSERT INTO bindings (name) VALUES ($1)", name)
+                bid = await conn.execute(
+                    "INSERT INTO bindings (name) VALUES ($1) RETURNING id", name
+                )
+                binding_ids.append(bid)
 
             # 6. География (Города и улицы через UUID)
             towns_data = [
@@ -128,7 +132,7 @@ async def full_seed():
                 (uuid.uuid4(), "г. Санкт-Петербург"),
             ]
             for fias_id, name in towns_data:
-                await conn.execute(
+                await conn.fetchval(
                     "INSERT INTO towns (fias_id, name) VALUES ($1, $2)", fias_id, name
                 )
 
@@ -167,9 +171,11 @@ async def full_seed():
                     450.00,
                     "978-5-699-90425-4",
                     672,
-                    "Твёрдый (7БЦ)",
+                    1,
                     cat_ids[0],
                     pub_ids[0],
+                    False,
+                    True,
                 ),
                 (
                     "Идиот",
@@ -177,9 +183,11 @@ async def full_seed():
                     520.00,
                     "978-5-17-112345-2",
                     640,
-                    "Твёрдый (7БЦ)",
+                    2,
                     cat_ids[0],
                     pub_ids[1],
+                    True,
+                    False,
                 ),
                 (
                     "1984",
@@ -187,9 +195,11 @@ async def full_seed():
                     320.00,
                     "978-5-17-080115-2",
                     320,
-                    "Мягкий (КБС)",
+                    2,
                     cat_ids[1],
                     pub_ids[1],
+                    True,
+                    True,
                 ),
                 (
                     "Зов Ктулху",
@@ -197,9 +207,11 @@ async def full_seed():
                     390.00,
                     "978-5-389-10522-5",
                     416,
-                    "Твёрдый (7БЦ)",
+                    1,
                     cat_ids[1],
                     pub_ids[0],
+                    True,
+                    False,
                 ),
                 (
                     "Братья Карамазовы",
@@ -207,17 +219,19 @@ async def full_seed():
                     600.00,
                     "978-5-699-95241-5",
                     800,
-                    "Кожаный",
+                    3,
                     cat_ids[0],
                     pub_ids[2],
+                    False,
+                    False,
                 ),
             ]
             book_ids = []
-            for title, ann, price, isbn, pages, bind, cid, pid in books_data:
+            for title, ann, price, isbn, pages, bind, cid, pid, is_new, is_bestseller in books_data:
                 bid = await conn.fetchval(
                     """
-                    INSERT INTO books (title, annotation, price, isbn, page_count, binding, cat_id, pub_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
+                    INSERT INTO books (title, annotation, price, isbn, page_count, binding_id, cat_id, pub_id, is_new, is_bestseller)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id
                 """,
                     title,
                     ann,
@@ -227,6 +241,8 @@ async def full_seed():
                     bind,
                     cid,
                     pid,
+                    is_new,
+                    is_bestseller,
                 )
                 book_ids.append(bid)
 

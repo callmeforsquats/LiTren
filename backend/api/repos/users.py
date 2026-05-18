@@ -1,6 +1,8 @@
 from curses import nonl
 from uuid import UUID
 
+from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
+
 from api.core.exceptions import AlreadExistsError, NotFoundError
 from api.schemas.catalog import BookRead
 from api.schemas.users import (
@@ -20,7 +22,6 @@ from api.schemas.users import (
     UserInfo,
     UserRead,
 )
-from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
 
 
 class UserRepo:
@@ -330,6 +331,11 @@ class UserRepo:
                 raise NotFoundError("Отзыв не найден")
             return ReviewInfo(**row)
 
-    async def update_user_picture(self, user_id: int, url: str):
+    async def update_user_picture(self, user_id: int, url: str) -> str:
+        query = """--sql
+        WITH old AS (SELECT picture_url FROM users WHERE id = $2)
+        UPDATE users SET picture_url = $1 WHERE id = $1
+        RETURNING (SELECT picture_url FROM old)
+        """
         async with self.pool.acquire() as conn:
-            await conn.execute("UPDATE users SET picture_url = $1 WHERE id = $2", url, user_id)
+            return await conn.fetchval(query, url, user_id)

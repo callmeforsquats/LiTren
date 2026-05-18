@@ -32,7 +32,6 @@ class CatRead(CatCreate):
 class AuthorBase(BaseModel):
     name: str | None = None
     bio: str | None = None
-    picture_url: str | None = None
 
 
 class AuthorUpdate(AuthorBase):
@@ -43,13 +42,12 @@ class AuthorCreate(AuthorBase):
     name: str
 
 
-class AuthorRead(BaseModel):
+class AuthorRead(AuthorCreate):
     id: int
-    name: str
 
 
-class AuthorInfo(AuthorRead, AuthorBase):
-    pass
+class AuthorInfo(AuthorRead):
+    picture_url: str | None = None
 
 
 # ---------- Pubs ------------
@@ -58,7 +56,6 @@ class AuthorInfo(AuthorRead, AuthorBase):
 class PubBase(BaseModel):
     name: str | None = None
     info: str | None = None
-    picture_url: str | None = None
 
 
 class PubUpdate(PubBase):
@@ -69,13 +66,12 @@ class PubCreate(PubUpdate):
     name: str
 
 
-class PubRead(BaseModel):
+class PubRead(PubCreate):
     id: int
-    name: str
     picture_url: str | None = None
 
 
-class PubInfo(PubRead, PubBase):
+class PubInfo(PubRead):
     pass
 
 
@@ -86,9 +82,11 @@ class BookBase(BaseModel):
     title: str | None = None
     price: str | None = None
     isbn: str | None = None
+    is_new: bool | None = None
+    is_bestseller: bool | None = None
     annotation: str | None = None
     page_count: int | None = None
-    binding: str | None = None
+    binding_id: int | None = None
     pub_id: int | None = None
     author_ids: list[int] | None = None
     topic_ids: list[int] | None = None
@@ -110,10 +108,16 @@ class BookRead(BaseModel):
     mean_rating: float
     reviews_count: int
     picture_url: str | None = None
+    is_new: bool
+    is_bestseller: bool
 
 
-class BookInfo(BookRead, BookBase):
-    publisher: PubRead | None = None
+class BookInfo(BookRead):
+    isbn: str | None = None
+    page_count: int | None = None
+    annotation: str | None = None
+    binding: str | None = None
+    pub: PubRead | None = None
     authors: list[AuthorRead] | None = None
     cat: CatRead | None = None
     topics: list[TopicRead] | None = None
@@ -130,14 +134,15 @@ class Sortby(str, Enum):
 
 class BookFilter(BaseModel):
     cat_id: int | None = None
-    topic_ids: list[int] | None = None
+    topic_id: list[int] | None = None
     min_price: float | None = Field(None, ge=0)
     max_price: float | None = Field(None, gt=0)
-    bindings: list[str] | None = None
+    binding_id: list[int] | None = None
     is_new: bool | None = None
+    is_bestseller: bool | None = None
     min_rating: float | None = None
-    author_ids: list[int] | None = None
-    pub_ids: list[int] | None = None
+    author_id: list[int] | None = None
+    pub_id: list[int] | None = None
     search: str | None = None
     limit: int = 10
     offset: int = 0

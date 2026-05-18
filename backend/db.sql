@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS books(
     price DECIMAL(10, 2) NOT NULL,
     isbn varchar(20) UNIQUE,
     page_count int,
-    binding varchar(50),
+    binding_id int REFERENCES bindings(id) ON DELETE SET NULL,
     is_bestseller boolean DEFAULT FALSE,
     is_new boolean DEFAULT TRUE,
     mean_rating DECIMAL(3, 2) DEFAULT 0,

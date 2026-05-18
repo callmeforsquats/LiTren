@@ -1,6 +1,9 @@
 import os
 import shutil
 import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from api.core.deps import (
     check_admin,
@@ -12,7 +15,6 @@ from api.core.deps import (
 from api.repos.catalog import CatalogRepo
 from api.repos.users import UserRepo
 from api.schemas.users import UserRead
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 router = APIRouter(prefix="/media", tags=["Media"])
 
@@ -37,6 +39,19 @@ def save_file_to_disk(file: UploadFile, entity_type: str) -> str:
     return f"/media/{entity_type}/{filename}"
 
 
+def delete_file_from_disk(filename: str | None = None):
+    if not filename:
+        return
+
+    relative_path = filename.lstrip("/")
+    filepath = Path(relative_path)
+    if filepath.exists() and filepath.is_file():
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            print(f"Ошибка при удалении файла:\n {e}")
+
+
 # 1. ДЛЯ ПОЛЬЗОВАТЕЛЕЙ (Доступно любому авторизованному для своего аватара)
 @router.patch("/avatar")
 async def upload_user_avatar(
@@ -46,9 +61,9 @@ async def upload_user_avatar(
 ):
     """Обновить аватар текущего пользователя."""
     url = save_file_to_disk(file, "avatars")
-
     # Вызываем точечный метод обновления одной колонки, который мы заложили в UserRepo
-    await repo.update_user_picture(user.id, url)
+    old_url = await repo.update_user_picture(user.id, url)
+    delete_file_from_disk(old_url)
     return {"status": "success", "url": url}
 
 
@@ -65,13 +80,15 @@ async def upload_catalog_image(
         raise HTTPException(status_code=400, detail="Неверный тип сущности")
 
     url = save_file_to_disk(file, entity_type)
-
+    old_url = None
     # Динамически вызываем нужный метод обновления одной колонки в CatalogRepo
     if entity_type == "books":
-        await repo.update_book_picture(id, url)
+        old_url = await repo.update_book_picture(id, url)
     elif entity_type == "authors":
-        await repo.update_author_picture(id, url)
+        old_url = await repo.update_author_picture(id, url)
     elif entity_type == "publishers":
-        await repo.update_publisher_picture(id, url)
+        old_url = await repo.update_pub_picture(id, url)
+
+    delete_file_from_disk(old_url)
 
     return {"status": "success", "url": url}

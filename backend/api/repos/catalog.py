@@ -34,7 +34,7 @@ class CatalogRepo:
                 cat_path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", filter.cat_id)
 
         query = """--sql
-        SELECT b.id, b.title, b.price, b.picture_url, b.mean_rating, b.reviews_count
+        SELECT b.id, b.title, b.price, b.picture_url, b.mean_rating, b.reviews_count, b.is_new, b.is_bestseller
         FROM books b LEFT JOIN cats c ON b.cat_id = c.id 
         WHERE TRUE
         """
@@ -60,21 +60,23 @@ class CatalogRepo:
         add_condition("b.price <= ?", filter.max_price)
         add_condition("b.is_new = ?", filter.is_new)
         add_condition("b.mean_rating >= ?", filter.min_rating)
-        add_condition("b.pub_id = ANY(?::int[])", filter.pub_ids)
-        add_condition("b.binding = ANY(?::varchar[])", filter.bindings)
+        add_condition("b.pub_id = ANY(?::int[])", filter.pub_id)
+        add_condition("b.binding_id = ANY(?::int[])", filter.binding_id)
+        add_condition("b.is_new = ?", filter.is_new)
+        add_condition("b.is_bestseller = ?", filter.is_bestseller)
         add_condition(
             """--sql 
             (SELECT array_agg(topic_id) FROM book_topics
             WHERE book_id = b.id) %% ?::int[] 
             """,
-            filter.topic_ids,
+            filter.topic_id,
         )
         add_condition(
             """--sql 
             (SELECT array_agg(author_id) FROM book_authors 
             WHERE book_id = b.id) %% ?::int[] 
             """,
-            filter.author_ids,
+            filter.author_id,
         )
         if filter.search:
             params.append(f"%{filter.search}%")
@@ -95,7 +97,7 @@ class CatalogRepo:
 
     async def get_book_by_id(self, id: int) -> BookInfo:
         query = """--sql 
-            SELECT b.*, 
+            SELECT b.*,bi.name AS binding,
             (
                 SELECT json_build_object(
                     'id',c.id,
@@ -129,6 +131,7 @@ class CatalogRepo:
                 WHERE bt.book_id = b.id
             ) as topics
             FROM books b
+            LEFT JOIN bindings bi ON b.binding_id = bi.id
             WHERE b.id = $1
         """
         async with self.pool.acquire() as conn:
@@ -350,17 +353,32 @@ class CatalogRepo:
 
     async def get_cats(self) -> CatRead:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT c.* FROM cats c")
+            rows = await conn.fetch("SELECT * FROM cats ORDER BY path")
             return [CatRead(**dict(row)) for row in rows]
 
-    async def update_book_picture(self, book_id: int, url: str):
+    async def update_book_picture(self, book_id: int, url: str) -> str:
+        query = """--sql
+        WITH old AS (SELECT picture_url FROM books WHERE id = $2)
+        UPDATE books SET picture_url = $1 WHERE id = $1
+        RETURNING (SELECT picture_url FROM old)
+        """
         async with self.pool.acquire() as conn:
-            await conn.execute("UPDATE books SET picture_url = $1 WHERE id = $2", url, book_id)
+            return await conn.fetchval(query, url, book_id)
 
-    async def update_author_picture(self, author_id: int, url: str):
+    async def update_author_picture(self, author_id: int, url: str) -> str:
+        query = """--sql
+        WITH old AS (SELECT picture_url FROM authors WHERE id = $2)
+        UPDATE authors SET picture_url = $1 WHERE id = $1
+        RETURNING (SELECT picture_url FROM old)
+        """
         async with self.pool.acquire() as conn:
-            await conn.execute("UPDATE authors SET picture_url = $1 WHERE id = $2", url, author_id)
+            await conn.fetchval(query, url, author_id)
 
-    async def update_pub_picture(self, pub_id: int, url: str):
+    async def update_pub_picture(self, pub_id: int, url: str) -> str:
+        query = """--sql
+        WITH old AS (SELECT picture_url FROM pubs WHERE id = $2)
+        UPDATE pubs SET picture_url = $1 WHERE id = $1
+        RETURNING (SELECT picture_url FROM old)
+        """
         async with self.pool.acquire() as conn:
-            await conn.execute("UPDATE pubs SET picture_url = $1 WHERE id = $2", url, pub_id)
+            return await conn.fetchval(query, url, pub_id)

@@ -1,14 +1,15 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
 from api.core.config import settings
 from api.core.db import db
 from api.core.exceptions import BaseError
 from api.routers import carts, catalog, media, orders, users
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from seed_data import full_seed
 
 
@@ -34,12 +35,14 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+main_router = APIRouter(prefix="/api")
 
-app.include_router(users.router)
-app.include_router(orders.router)
-app.include_router(catalog.router)
-app.include_router(carts.router)
-app.include_router(media.router)
+main_router.include_router(users.router)
+main_router.include_router(orders.router)
+main_router.include_router(catalog.router)
+main_router.include_router(carts.router)
+main_router.include_router(media.router)
+app.include_router(main_router)
 
 app.mount("/media", StaticFiles(directory="media"), name="media")
 
