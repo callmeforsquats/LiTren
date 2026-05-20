@@ -67,14 +67,14 @@ class CatalogRepo:
         add_condition(
             """--sql 
             (SELECT array_agg(topic_id) FROM book_topics
-            WHERE book_id = b.id) %% ?::int[] 
+            WHERE book_id = b.id) && ?::int[] 
             """,
             filter.topic_id,
         )
         add_condition(
             """--sql 
             (SELECT array_agg(author_id) FROM book_authors 
-            WHERE book_id = b.id) %% ?::int[] 
+            WHERE book_id = b.id) && ?::int[] 
             """,
             filter.author_id,
         )
@@ -88,8 +88,6 @@ class CatalogRepo:
 
         query += f" ORDER BY {sort} {direction} LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
         params.extend([filter.limit, filter.offset])
-        print(query)
-        print(params[1])
 
         async with self.pool.acquire() as con:
             rows = await con.fetch(query, *params)

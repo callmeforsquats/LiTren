@@ -1,16 +1,14 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-
 from api.core.config import settings
 from api.core.db import db
 from api.core.exceptions import BaseError
 from api.routers import carts, catalog, media, orders, users
-from seed_data import full_seed
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 
 @asynccontextmanager
@@ -18,8 +16,7 @@ async def lifespan(app: FastAPI):
     await db.connect()
     await db.init_db()
     if settings.DB_SEED:
-        await full_seed()
-        pass
+        await db.seed_data()
     yield
     await db.disconnect()
 

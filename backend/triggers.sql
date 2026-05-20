@@ -1,3 +1,6 @@
+-- ==========================================================
+-- -------------------  ТРИГГЕРЫ ----------------------------
+-- ==========================================================
 -- 1. СБОРКА СТРОКИ АДРЕСА (user_addresses)
 CREATE OR REPLACE FUNCTION func_build_full_address()
     RETURNS TRIGGER
@@ -93,26 +96,35 @@ CREATE TRIGGER trg_refresh_popularity
     FOR EACH ROW
     EXECUTE PROCEDURE update_popularity_score();
 
+-- 5. ПОСТРОЕНИЕ ПУТИ ДЛЯ КАТЕГОРИИ
 CREATE OR REPLACE FUNCTION build_cat_path()
     RETURNS TRIGGER
     AS $$
 DECLARE
-    cat_path varchar;
+    temp_path text;
 BEGIN
     IF NEW.parent_id IS NULL THEN
-        NEW.path := text(nextval(pg_get_serial_sequence('cats', 'id')));
-        NEW.id = integer(NEW.path)
+        UPDATE
+            cats
+        SET
+            path = NEW.id::varchar
+        WHERE
+            id = NEW.id;
     ELSE
         SELECT
             path
         INTO
-            cat_path
+            temp_path
         FROM
             cats
         WHERE
             cats.id = NEW.parent_id;
-        NEW.id = nextval(pg_get_serial_sequence('cats', 'id'));
-        NEW.path := cat_path || '/' || text(NEW.id)
+        UPDATE
+            cats
+        SET
+            path = temp_path || '/' || NEW.id::varchar
+        WHERE
+            id = NEW.id;
     END IF;
     RETURN NEW;
 END;
@@ -122,33 +134,139 @@ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_build_cat_path ON cats;
 
 CREATE TRIGGER trg_build_cat_path
-    BEFORE INSERT ON cats
+    AFTER INSERT ON cats
     FOR EACH ROW
     EXECUTE PROCEDURE build_cat_path();
 
--- -- 5. АВТО-РАСЧЕТ СУММЫ ЗАКАЗА
--- CREATE OR REPLACE FUNCTION calculate_order_total()
---     RETURNS TRIGGER
---     AS $$
--- BEGIN
---     UPDATE
---         orders
---     SET
---         total_price =(
---             SELECT
---                 SUM(price_at_purchase * quantity)
---             FROM
---                 order_items
---             WHERE
---                 order_id = COALESCE(NEW.order_id, OLD.order_id))
---     WHERE
---         id = COALESCE(NEW.order_id, OLD.order_id);
---     RETURN NULL;
--- END;
--- $$
--- LANGUAGE plpgsql;
--- DROP TRIGGER IF EXISTS trigger_update_order_total ON order_items;
--- CREATE TRIGGER trigger_update_order_total
---     AFTER INSERT OR UPDATE OR DELETE ON order_items
---     FOR EACH ROW
---     EXECUTE PROCEDURE calculate_order_total();
+-- ==========================================================
+-- 6. АВТОМАТИЧЕСКОЕ ДОБАВЛЕНИЕ ТЕМЫ В КАТЕГОРИЮ (только при вставке)
+-- ==========================================================
+CREATE OR REPLACE FUNCTION auto_add_topic_to_category()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    _cat_id int;
+BEGIN
+    SELECT
+        cat_id
+    INTO
+        _cat_id
+    FROM
+        books
+    WHERE
+        id = NEW.book_id;
+    IF _cat_id IS NOT NULL THEN
+        INSERT INTO cat_topics(cat_id, topic_id)
+            VALUES (_cat_id, NEW.topic_id)
+        ON CONFLICT
+            DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_auto_add_topic_to_category ON book_topics;
+
+CREATE TRIGGER trg_auto_add_topic_to_category
+    AFTER INSERT ON book_topics
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_add_topic_to_category();
+
+-- ==========================================================
+-- 7. АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ ТЕМЫ ИЗ КАТЕГОРИИ
+-- ==========================================================
+CREATE OR REPLACE FUNCTION auto_remove_topic_from_category()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    _cat_id int;
+    _count int;
+BEGIN
+    SELECT
+        cat_id
+    INTO
+        _cat_id
+    FROM
+        books
+    WHERE
+        id = OLD.book_id;
+    IF _cat_id IS NOT NULL THEN
+        SELECT
+            COUNT(*)
+        INTO
+            _count
+        FROM
+            book_topics bt
+            JOIN books b ON b.id = bt.book_id
+        WHERE
+            bt.topic_id = OLD.topic_id
+            AND b.cat_id = _cat_id;
+        IF _count = 0 THEN
+            DELETE FROM cat_topics
+            WHERE cat_id = _cat_id
+                AND topic_id = OLD.topic_id;
+        END IF;
+    END IF;
+    RETURN OLD;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_auto_remove_topic_from_category ON book_topics;
+
+CREATE TRIGGER trg_auto_remove_topic_from_category
+    AFTER DELETE ON book_topics
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_remove_topic_from_category();
+
+-- ==========================================================
+-- 8. ПРИ СМЕНЕ КАТЕГОРИИ КНИГИ
+-- ==========================================================
+CREATE OR REPLACE FUNCTION recalc_topics_on_category_change()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    -- Если категория не изменилась, выходим
+    IF OLD.cat_id IS NOT DISTINCT FROM NEW.cat_id THEN
+        RETURN NEW;
+    END IF;
+    -- Удаляем темы из старой категории, если их больше нет
+    IF OLD.cat_id IS NOT NULL THEN
+        DELETE FROM cat_topics ct
+        WHERE ct.cat_id = OLD.cat_id
+            AND NOT EXISTS(
+                SELECT
+                    1
+                FROM
+                    book_topics bt
+                    JOIN books b ON b.id = bt.book_id
+                WHERE
+                    bt.topic_id = ct.topic_id
+                    AND b.cat_id = OLD.cat_id);
+    END IF;
+    -- Добавляем все темы книги в новую категорию
+    IF NEW.cat_id IS NOT NULL THEN
+        INSERT INTO cat_topics(cat_id, topic_id)
+        SELECT
+            NEW.cat_id,
+            bt.topic_id
+        FROM
+            book_topics bt
+        WHERE
+            bt.book_id = NEW.id
+        ON CONFLICT
+            DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_recalc_topics_on_category_change ON books;
+
+CREATE TRIGGER trg_recalc_topics_on_category_change
+    AFTER UPDATE OF cat_id ON books
+    FOR EACH ROW
+    EXECUTE FUNCTION recalc_topics_on_category_change();
+
