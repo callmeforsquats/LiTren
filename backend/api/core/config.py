@@ -16,6 +16,7 @@ class Config(BaseSettings):
     ADMIN_PASSWORD: str = "herovich"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+    ENABLE_ML: bool = False
 
     @property
     def DB_URL(self) -> str:

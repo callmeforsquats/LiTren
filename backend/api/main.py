@@ -1,9 +1,11 @@
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
 from api.core.config import settings
 from api.core.db import db
 from api.core.exceptions import BaseError
+from api.core.ml import index_db
 from api.routers import carts, catalog, media, orders, users
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,8 @@ async def lifespan(app: FastAPI):
     await db.init_db()
     if settings.DB_SEED:
         await db.seed_data()
+    if settings.ENABLE_ML:
+        await index_db()
     yield
     await db.disconnect()
 
@@ -41,7 +45,10 @@ main_router.include_router(carts.router)
 main_router.include_router(media.router)
 app.include_router(main_router)
 
-app.mount("/media", StaticFiles(directory="media"), name="media")
+
+media_path = os.path.join(os.path.dirname(__file__), "..", "media")
+os.makedirs(media_path, exist_ok=True)
+app.mount("/media", StaticFiles(directory=media_path), name="media")
 
 
 @app.exception_handler(BaseError)

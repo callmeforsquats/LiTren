@@ -163,6 +163,12 @@ CREATE TABLE IF NOT EXISTS book_topics(
 CREATE TABLE IF NOT EXISTS cat_topics(
     cat_id int REFERENCES cats(id) ON DELETE CASCADE,
     topic_id int REFERENCES topics(id) ON DELETE CASCADE,
+    books_count int DEFAULT 0,
     PRIMARY KEY (cat_id, topic_id)
 );
 
+CREATE TABLE IF NOT EXISTS cat_authors(
+    cat_id int REFERENCES cats(id) ON DELETE CASCADE,
+    author_id int REFERENCES authors(id) ON DELETE CASCADE,
+    books_count int DEFAULT 0,
+    PRIMARY KEY (cat_id, author_id))

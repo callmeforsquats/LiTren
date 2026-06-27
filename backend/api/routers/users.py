@@ -1,3 +1,6 @@
+from fastapi import APIRouter, Depends, Query, Request, Response
+from typing_extensions import Annotated
+
 from api.core.config import settings
 from api.core.deps import (
     create_access_token,
@@ -23,8 +26,6 @@ from api.schemas.users import (
     UserInfo,
     UserRead,
 )
-from fastapi import APIRouter, Depends, Query, Request, Response
-from typing_extensions import Annotated
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -96,9 +97,9 @@ async def get_me(
     return await repo.get_user_by_id(user.id)
 
 
-@router.post("/review")
+@router.post("/reviews")
 async def add_review(
-    id: int,
+    book_id: int,
     review: ReviewCreate,
     user: UserRead = Depends(get_current_user),
     repo: UserRepo = Depends(get_user_repo),

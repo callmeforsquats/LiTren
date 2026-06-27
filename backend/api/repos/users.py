@@ -16,7 +16,6 @@ from api.schemas.users import (
     OrderRead,
     ReviewCreate,
     ReviewFilter,
-    ReviewInfo,
     ReviewRead,
     UserBase,
     UserInfo,
@@ -294,10 +293,12 @@ class UserRepo:
         except ForeignKeyViolationError:
             raise NotFoundError("Не удалось добавить отзыв. Указанная книга отсутствует")
 
-    async def get_reviews(self, filter: ReviewFilter) -> list[ReviewRead]:
-        query = """--sql
-        SELECT r.id, r.rating, r.created_at, r.book_id,b.title AS book_title
-        FROM reviews JOIN books b ON r.book_id = b.id 
+    async def get_reviews(
+        self, filter: ReviewFilter, book_id: int | None = None, with_text: bool = False
+    ) -> list[ReviewRead]:
+        query = f"""--sql
+        SELECT r.id, r.rating, r.created_at, r.book_id,b.title AS book_title {", r.text" if with_text else ""}
+        FROM reviews r JOIN books b ON r.book_id = b.id 
         WHERE TRUE
         """
         params = []
@@ -308,18 +309,17 @@ class UserRepo:
                 params.append(value)
                 query += f" AND {sql.replace('?', f'${len(params)}')} "
 
-        add_condition("user_id = ?", filter.user_id)
-        add_condition("book_id = ?", filter.book_id)
-        add_condition("rating >= ?", filter.min_rating)
-        add_condition("rating <= ?", filter.max_rating)
-        sort = "rating" if filter.bad_first or filter.good_first else "created_at"
-        order = "ASC" if filter.bad_first else "DESC"
-        query += f"ORDER BY {order} {sort} LIMIT ${len(params) + 1} OFFSET {len(params) + 2}"
+        add_condition("r.user_id = ?", filter.user_id)
+        add_condition("r.book_id = ?", book_id)
+        order = "r.rating" if filter.bad_first or filter.good_first else "r.created_at"
+        dir = "ASC" if filter.bad_first else "DESC"
+        params.extend([filter.limit, filter.offset])
+        query += f"ORDER BY {order} {dir} LIMIT ${len(params) - 1} OFFSET ${len(params)}"
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(query, *filter.model_dump(exclude_unset=True))
+            rows = await conn.fetch(query, *params)
             return [ReviewRead(**row) for row in rows]
 
-    async def get_review_by_id(self, id: int):
+    async def get_review_by_id(self, id: int) -> ReviewRead:
         query = """--sql
         SELECT r.id, r.rating, r.created_at, r.book_id, b.title AS book_title, r.text
         FROM reviews JOIN books b ON r.book_id = b.id 
@@ -329,12 +329,12 @@ class UserRepo:
             row = await conn.fetch(query, id)
             if not row:
                 raise NotFoundError("Отзыв не найден")
-            return ReviewInfo(**row)
+            return ReviewRead(**row)
 
     async def update_user_picture(self, user_id: int, url: str) -> str:
         query = """--sql
         WITH old AS (SELECT picture_url FROM users WHERE id = $2)
-        UPDATE users SET picture_url = $1 WHERE id = $1
+        UPDATE users SET picture_url = $1 WHERE id = $2
         RETURNING (SELECT picture_url FROM old)
         """
         async with self.pool.acquire() as conn:

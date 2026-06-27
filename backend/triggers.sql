@@ -1,7 +1,6 @@
 -- ==========================================================
--- -------------------  ТРИГГЕРЫ ----------------------------
--- ==========================================================
 -- 1. СБОРКА СТРОКИ АДРЕСА (user_addresses)
+-- ==========================================================
 CREATE OR REPLACE FUNCTION func_build_full_address()
     RETURNS TRIGGER
     AS $$
@@ -41,7 +40,9 @@ CREATE TRIGGER trg_build_address
     FOR EACH ROW
     EXECUTE PROCEDURE func_build_full_address();
 
+-- ==========================================================
 -- 2. ОБНОВЛЕНИЕ РЕЙТИНГА КНИГИ (books)
+-- ==========================================================
 CREATE OR REPLACE FUNCTION update_book_rating()
     RETURNS TRIGGER
     AS $$
@@ -75,7 +76,9 @@ CREATE TRIGGER trigger_update_rating
     FOR EACH ROW
     EXECUTE PROCEDURE update_book_rating();
 
--- 4. ПЕРЕСЧЕТ ПОПУЛЯРНОСТИ (popularity_score)
+-- ==========================================================
+-- 3. ПЕРЕСЧЕТ ПОПУЛЯРНОСТИ (popularity_score)
+-- ==========================================================
 CREATE OR REPLACE FUNCTION update_popularity_score()
     RETURNS TRIGGER
     AS $$
@@ -96,7 +99,9 @@ CREATE TRIGGER trg_refresh_popularity
     FOR EACH ROW
     EXECUTE PROCEDURE update_popularity_score();
 
--- 5. ПОСТРОЕНИЕ ПУТИ ДЛЯ КАТЕГОРИИ
+-- ==========================================================
+-- 4. ПОСТРОЕНИЕ ПУТИ ДЛЯ КАТЕГОРИИ
+-- ==========================================================
 CREATE OR REPLACE FUNCTION build_cat_path()
     RETURNS TRIGGER
     AS $$
@@ -139,7 +144,7 @@ CREATE TRIGGER trg_build_cat_path
     EXECUTE PROCEDURE build_cat_path();
 
 -- ==========================================================
--- 6. АВТОМАТИЧЕСКОЕ ДОБАВЛЕНИЕ ТЕМЫ В КАТЕГОРИЮ (только при вставке)
+-- 5. АВТОМАТИЧЕСКОЕ УМЕНЬШЕНИЕ/УДАЛЕНИЕ ТЕМЫ ИЗ КАТЕГОРИИ (ПРИ УДАЛЕНИИ ТЕМЫ У КНИГИ)
 -- ==========================================================
 CREATE OR REPLACE FUNCTION auto_add_topic_to_category()
     RETURNS TRIGGER
@@ -147,6 +152,7 @@ CREATE OR REPLACE FUNCTION auto_add_topic_to_category()
 DECLARE
     _cat_id int;
 BEGIN
+    -- Получаем категорию книги
     SELECT
         cat_id
     INTO
@@ -155,11 +161,14 @@ BEGIN
         books
     WHERE
         id = NEW.book_id;
+    -- Если у книги есть категория
     IF _cat_id IS NOT NULL THEN
-        INSERT INTO cat_topics(cat_id, topic_id)
-            VALUES (_cat_id, NEW.topic_id)
-        ON CONFLICT
-            DO NOTHING;
+        -- Добавляем или увеличиваем счётчик
+        INSERT INTO cat_topics(cat_id, topic_id, books_count)
+            VALUES (_cat_id, NEW.topic_id, 1)
+        ON CONFLICT (cat_id, topic_id)
+            DO UPDATE SET
+                books_count = cat_topics.books_count + 1;
     END IF;
     RETURN NEW;
 END;
@@ -174,15 +183,16 @@ CREATE TRIGGER trg_auto_add_topic_to_category
     EXECUTE FUNCTION auto_add_topic_to_category();
 
 -- ==========================================================
--- 7. АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ ТЕМЫ ИЗ КАТЕГОРИИ
+-- 6. АВТОМАТИЧЕСКОЕ УМЕНЬШЕНИЕ/УДАЛЕНИЕ ТЕМЫ ИЗ КАТЕГОРИИ (ПРИ УДАЛЕНИИ ТЕМЫ У КНИГИ)
 -- ==========================================================
 CREATE OR REPLACE FUNCTION auto_remove_topic_from_category()
     RETURNS TRIGGER
     AS $$
 DECLARE
     _cat_id int;
-    _count int;
+    _new_count int;
 BEGIN
+    -- Получаем категорию книги
     SELECT
         cat_id
     INTO
@@ -192,17 +202,20 @@ BEGIN
     WHERE
         id = OLD.book_id;
     IF _cat_id IS NOT NULL THEN
-        SELECT
-            COUNT(*)
-        INTO
-            _count
-        FROM
-            book_topics bt
-            JOIN books b ON b.id = bt.book_id
+        -- Уменьшаем счётчик
+        UPDATE
+            cat_topics
+        SET
+            books_count = books_count - 1
         WHERE
-            bt.topic_id = OLD.topic_id
-            AND b.cat_id = _cat_id;
-        IF _count = 0 THEN
+            cat_id = _cat_id
+            AND topic_id = OLD.topic_id
+        RETURNING
+            books_count
+        INTO
+            _new_count;
+        -- Если книг больше нет, удаляем связь
+        IF _new_count <= 0 THEN
             DELETE FROM cat_topics
             WHERE cat_id = _cat_id
                 AND topic_id = OLD.topic_id;
@@ -221,52 +234,210 @@ CREATE TRIGGER trg_auto_remove_topic_from_category
     EXECUTE FUNCTION auto_remove_topic_from_category();
 
 -- ==========================================================
--- 8. ПРИ СМЕНЕ КАТЕГОРИИ КНИГИ
+-- 7. ОБНОВЛЕНИЕ ТЕМ ПРИ СМЕНЕ КАТЕГОРИИ КНИГИ
 -- ==========================================================
-CREATE OR REPLACE FUNCTION recalc_topics_on_category_change()
+CREATE OR REPLACE FUNCTION update_topics_on_category_change()
     RETURNS TRIGGER
     AS $$
+DECLARE
+    topic_record RECORD;
+    _new_count int;
 BEGIN
     -- Если категория не изменилась, выходим
     IF OLD.cat_id IS NOT DISTINCT FROM NEW.cat_id THEN
         RETURN NEW;
     END IF;
-    -- Удаляем темы из старой категории, если их больше нет
-    IF OLD.cat_id IS NOT NULL THEN
-        DELETE FROM cat_topics ct
-        WHERE ct.cat_id = OLD.cat_id
-            AND NOT EXISTS(
-                SELECT
-                    1
-                FROM
-                    book_topics bt
-                    JOIN books b ON b.id = bt.book_id
+    -- Для каждой темы книги
+    FOR topic_record IN
+    SELECT
+        topic_id
+    FROM
+        book_topics
+    WHERE
+        book_id = NEW.id LOOP
+            -- Удаляем из старой категории
+            IF OLD.cat_id IS NOT NULL THEN
+                UPDATE
+                    cat_topics
+                SET
+                    books_count = books_count - 1
                 WHERE
-                    bt.topic_id = ct.topic_id
-                    AND b.cat_id = OLD.cat_id);
-    END IF;
-    -- Добавляем все темы книги в новую категорию
-    IF NEW.cat_id IS NOT NULL THEN
-        INSERT INTO cat_topics(cat_id, topic_id)
-        SELECT
-            NEW.cat_id,
-            bt.topic_id
-        FROM
-            book_topics bt
-        WHERE
-            bt.book_id = NEW.id
-        ON CONFLICT
-            DO NOTHING;
+                    cat_id = OLD.cat_id
+                    AND topic_id = topic_record.topic_id
+                RETURNING
+                    books_count
+                INTO
+                    _new_count;
+                IF _new_count <= 0 THEN
+                    DELETE FROM cat_topics
+                    WHERE cat_id = OLD.cat_id
+                        AND topic_id = topic_record.topic_id;
+                END IF;
+            END IF;
+            -- Добавляем в новую категорию
+            IF NEW.cat_id IS NOT NULL THEN
+                INSERT INTO cat_topics(cat_id, topic_id, books_count)
+                    VALUES (NEW.cat_id, topic_record.topic_id, 1)
+                ON CONFLICT (cat_id, topic_id)
+                    DO UPDATE SET
+                        books_count = cat_topics.books_count + 1;
+            END IF;
+        END LOOP;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_topics_on_category_change ON books;
+
+CREATE TRIGGER trg_update_topics_on_category_change
+    AFTER UPDATE OF cat_id ON books
+    FOR EACH ROW
+    EXECUTE FUNCTION update_topics_on_category_change();
+
+-- ==========================================================
+-- 8. АВТОМАТИЧЕСКОЕ ДОБАВЛЕНИЕ АВТОРА В КАТЕГОРИЮ
+-- ==========================================================
+CREATE OR REPLACE FUNCTION auto_add_author_to_category()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    _cat_id int;
+BEGIN
+    -- Получаем категорию книги
+    SELECT
+        cat_id
+    INTO
+        _cat_id
+    FROM
+        books
+    WHERE
+        id = NEW.book_id;
+    -- Если у книги есть категория
+    IF _cat_id IS NOT NULL THEN
+        -- Добавляем или обновляем счётчик
+        INSERT INTO cat_authors(author_id, cat_id, books_count)
+            VALUES (NEW.author_id, _cat_id, 1)
+        ON CONFLICT (author_id, cat_id)
+            DO UPDATE SET
+                books_count = cat_authors.books_count + 1;
     END IF;
     RETURN NEW;
 END;
 $$
 LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_recalc_topics_on_category_change ON books;
+DROP TRIGGER IF EXISTS trg_auto_add_author_to_category ON book_authors;
 
-CREATE TRIGGER trg_recalc_topics_on_category_change
+CREATE TRIGGER trg_auto_add_author_to_category
+    AFTER INSERT ON book_authors
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_add_author_to_category();
+
+-- ==========================================================
+-- 9. АВТОМАТИЧЕСКОЕ УДАЛЕНИЕ АВТОРА ИЗ КАТЕГОРИИ
+-- ==========================================================
+CREATE OR REPLACE FUNCTION auto_remove_author_from_category()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    _cat_id int;
+    _new_count int;
+BEGIN
+    -- Получаем категорию книги
+    SELECT
+        cat_id
+    INTO
+        _cat_id
+    FROM
+        books
+    WHERE
+        id = OLD.book_id;
+    IF _cat_id IS NOT NULL THEN
+        -- Уменьшаем счётчик
+        UPDATE
+            cat_authors
+        SET
+            books_count = books_count - 1
+        WHERE
+            author_id = OLD.author_id
+            AND cat_id = _cat_id
+        RETURNING
+            books_count
+        INTO
+            _new_count;
+        -- Если книг больше нет, удаляем связь
+        IF _new_count <= 0 THEN
+            DELETE FROM cat_authors
+            WHERE author_id = OLD.author_id
+                AND cat_id = _cat_id;
+        END IF;
+    END IF;
+    RETURN OLD;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_auto_remove_author_from_category ON book_authors;
+
+CREATE TRIGGER trg_auto_remove_author_from_category
+    AFTER DELETE ON book_authors
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_remove_author_from_category();
+
+-- ==========================================================
+-- 10. ОБНОВЛЕНИЕ ПРИ СМЕНЕ КАТЕГОРИИ КНИГИ
+-- ==========================================================
+CREATE OR REPLACE FUNCTION update_authors_on_category_change()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    author_record RECORD;
+BEGIN
+    -- Если категория не изменилась, выходим
+    IF OLD.cat_id IS NOT DISTINCT FROM NEW.cat_id THEN
+        RETURN NEW;
+    END IF;
+    -- Для каждого автора книги
+    FOR author_record IN
+    SELECT
+        author_id
+    FROM
+        book_authors
+    WHERE
+        book_id = NEW.id LOOP
+            -- Удаляем из старой категории
+            IF OLD.cat_id IS NOT NULL THEN
+                UPDATE
+                    cat_authors
+                SET
+                    books_count = books_count - 1
+                WHERE
+                    author_id = author_record.author_id
+                    AND cat_id = OLD.cat_id;
+                DELETE FROM cat_authors
+                WHERE author_id = author_record.author_id
+                    AND cat_id = OLD.cat_id
+                    AND books_count <= 0;
+            END IF;
+            -- Добавляем в новую категорию
+            IF NEW.cat_id IS NOT NULL THEN
+                INSERT INTO cat_authors(author_id, cat_id, books_count)
+                    VALUES (author_record.author_id, NEW.cat_id, 1)
+                ON CONFLICT (author_id, cat_id)
+                    DO UPDATE SET
+                        books_count = cat_authors.books_count + 1;
+            END IF;
+        END LOOP;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_authors_on_category_change ON books;
+
+CREATE TRIGGER trg_update_authors_on_category_change
     AFTER UPDATE OF cat_id ON books
     FOR EACH ROW
-    EXECUTE FUNCTION recalc_topics_on_category_change();
+    EXECUTE FUNCTION update_authors_on_category_change();
 

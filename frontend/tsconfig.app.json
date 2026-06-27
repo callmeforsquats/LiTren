@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
+    "types": ["svelte", "vite/client"]
+  },
+  "files": ["src/vite-env.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "src/**/*.d.ts"]
+}

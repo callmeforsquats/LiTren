@@ -1,11 +1,10 @@
-from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
-
 from api.core.exceptions import AlreadExistsError, NotFoundError
 from api.schemas.catalog import (
     AuthorCreate,
     AuthorInfo,
     AuthorRead,
     AuthorUpdate,
+    BindingRead,
     BookCreate,
     BookFilter,
     BookInfo,
@@ -21,6 +20,7 @@ from api.schemas.catalog import (
     TopicCreate,
     TopicRead,
 )
+from asyncpg import ForeignKeyViolationError, Pool, UniqueViolationError
 
 
 class CatalogRepo:
@@ -95,7 +95,7 @@ class CatalogRepo:
 
     async def get_book_by_id(self, id: int) -> BookInfo:
         query = """--sql 
-            SELECT b.*,bi.name AS binding,
+            SELECT b.*,
             (
                 SELECT json_build_object(
                     'id',c.id,
@@ -127,9 +127,14 @@ class CatalogRepo:
                 FROM topics t
                 JOIN book_topics bt ON t.id = bt.topic_id
                 WHERE bt.book_id = b.id
-            ) as topics
+            ) as topics,
+            (
+                SELECT json_build_object(
+                'id',bi.id,'name',bi.name)
+                FROM bindings bi
+                WHERE bi.id = b.binding_id
+            ) as binding
             FROM books b
-            LEFT JOIN bindings bi ON b.binding_id = bi.id
             WHERE b.id = $1
         """
         async with self.pool.acquire() as conn:
@@ -137,6 +142,20 @@ class CatalogRepo:
             if not row:
                 raise NotFoundError(f"Книга с ID {id} не найдена")
             return BookInfo(**dict(row))
+
+    async def get_all_annotiations(self) -> list[dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, annotation FROM books")
+            return [dict(row) for row in rows]
+
+    async def get_books_by_ids(self, ids: list[int]) -> list[BookRead]:
+        query = """--sql
+        SELECT b.id, b.title, b.price, b.picture_url, b.mean_rating, b.reviews_count, b.is_new, b.is_bestseller
+        FROM books b WHERE b.id = ANY($1::int[])
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, ids)
+            return [BookRead(**dict(row)) for row in rows]
 
     async def create_book(self, data: BookCreate) -> int:
         data_dict = data.model_dump(exclude=("author_ids", "topic_ids"))
@@ -217,6 +236,54 @@ class CatalogRepo:
         async with self.pool.acquire() as conn:
             await conn.execute(query, id, count if count and count > 0 else 1)
 
+    async def add_binding(self, name: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO bingings (name) VALUES ($1) ON CONFLICT DO NOTHING", name
+            )
+
+    async def get_bindings(self) -> list[BindingRead]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, name FROM bindings")
+            return [BindingRead(**dict(row)) for row in rows]
+
+    async def delete_binding(self, id: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM bindings where id = ")
+
+    async def get_authors(self, cat_id: int | None = None) -> list[AuthorRead]:
+        async with self.pool.acquire() as conn:
+            if cat_id is None:
+                res = await conn.fetch("SELECT a.id, a.name FROM authors a")
+                return [AuthorRead(**dict(row)) for row in res]
+            else:
+                query = """--sql
+                SELECT a.id, a.name, MAX(ca.books_count) as mb FROM authors a
+                JOIN cat_authors ca ON a.id = ca.author_id
+                JOIN cats c on ca.cat_id = c.id
+                WHERE c.id = $1 OR c.path LIKE $2
+                GROUP BY a.id, a.name ORDER BY mb DESC
+                """
+                path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", cat_id)
+                if path:
+                    query = """--sql
+                    SELECT a.id, a.name, MAX(ca.books_count) as mb FROM authors a
+                    JOIN cat_authors ca ON a.id = ca.author_id
+                    JOIN cats c on ca.cat_id = c.id
+                    WHERE c.id = $1 OR c.path LIKE $2
+                    GROUP BY a.id, a.name ORDER BY mb DESC
+                    """
+                    res = await conn.fetch(query, cat_id, path + "%")
+                else:
+                    query = """--sql
+                    SELECT a.id, a.name, ca.books_count FROM authors a
+                    JOIN cat_authors ca ON a.id = ca.author_id
+                    WHERE ca.cat_id = $1
+                    ORDER BY mb DESC
+                    """
+                    res = await conn.fetch(query, cat_id)
+                return [AuthorRead(**dict(row)) for row in res]
+
     async def get_author_by_id(self, id: int) -> AuthorInfo:
         query = "SELECT a.id, a.name, a.picture_url, a.bio FROM authors a WHERE a.id = $1"
         async with self.pool.acquire() as conn:
@@ -276,6 +343,11 @@ class CatalogRepo:
                 raise NotFoundError("Издательство не найдено")
             return PubInfo(**dict(row))
 
+    async def get_pubs(self) -> list[PubRead]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT p.id,p.name,p.picture_url FROM pubs p")
+            return [PubRead(**dict(row)) for row in rows]
+
     async def delete_pub(self, id: int) -> bool:
         async with self.pool.acquire() as conn:
             res = await conn.execute("DELETE FROM pubs WHERE id = $1", id)
@@ -300,17 +372,25 @@ class CatalogRepo:
                 res = await conn.fetch("SELECT t.* from topics t")
                 return [TopicRead(**dict(row)) for row in res]
             else:
-                query = """--sql
-                SELECT DISTINCT t.id, t.name FROM topics t
-                JOIN cat_topics ct ON t.id = ct.topic_id
-                JOIN cats c on ct.cat_id = c.id
-                WHERE c.id = $1
-                """
                 path = await conn.fetchval("SELECT path FROM cats WHERE id = $1", cat_id)
                 if path:
-                    query += "OR c.path LIKE $2"
+                    query = """
+                    SELECT t.id, t.name, MAX(ct.books_count) as mb
+                    FROM topics t
+                    JOIN cat_topics ct ON t.id = ct.topic_id
+                    JOIN cats c ON ct.cat_id = c.id
+                    WHERE c.id = $1 OR c.path LIKE $2
+                    GROUP BY t.id, t.name
+                    ORDER BY mb DESC
+                    """
                     res = await conn.fetch(query, cat_id, path + "%")
                 else:
+                    query = """---sql
+                    SELECT t.id, t.name, ct.books_count FROM topics t
+                    JOIN cat_topics ct on t.id = ct.topic_id
+                    WHERE ct.cat_id = $1
+                    ORDER BY ct.books_count DESC
+                    """
                     res = await conn.fetch(query, cat_id)
                 return [TopicRead(**dict(row)) for row in res]
 
@@ -357,7 +437,7 @@ class CatalogRepo:
     async def update_book_picture(self, book_id: int, url: str) -> str:
         query = """--sql
         WITH old AS (SELECT picture_url FROM books WHERE id = $2)
-        UPDATE books SET picture_url = $1 WHERE id = $1
+        UPDATE books SET picture_url = $1 WHERE id = $2
         RETURNING (SELECT picture_url FROM old)
         """
         async with self.pool.acquire() as conn:
@@ -366,7 +446,7 @@ class CatalogRepo:
     async def update_author_picture(self, author_id: int, url: str) -> str:
         query = """--sql
         WITH old AS (SELECT picture_url FROM authors WHERE id = $2)
-        UPDATE authors SET picture_url = $1 WHERE id = $1
+        UPDATE authors SET picture_url = $1 WHERE id = $2
         RETURNING (SELECT picture_url FROM old)
         """
         async with self.pool.acquire() as conn:
@@ -375,7 +455,7 @@ class CatalogRepo:
     async def update_pub_picture(self, pub_id: int, url: str) -> str:
         query = """--sql
         WITH old AS (SELECT picture_url FROM pubs WHERE id = $2)
-        UPDATE pubs SET picture_url = $1 WHERE id = $1
+        UPDATE pubs SET picture_url = $1 WHERE id = $2
         RETURNING (SELECT picture_url FROM old)
         """
         async with self.pool.acquire() as conn:

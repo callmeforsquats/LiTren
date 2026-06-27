@@ -1,3 +1,5 @@
+from fastapi import APIRouter, Depends, Request, Response, status
+
 from api.core.deps import (
     create_session_id,
     get_optional_user_id,
@@ -6,12 +8,11 @@ from api.core.deps import (
 )
 from api.repos.users import UserRepo
 from api.schemas.users import ItemCreate, ItemRead  # Схемы из нашего общего файла
-from fastapi import APIRouter, Depends, Request, Response, status
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
 
-@router.get("/", response_model=list[ItemRead])
+@router.get("", response_model=list[ItemRead])
 async def get_cart(
     request: Request,
     user_id: int | None = Depends(get_optional_user_id),

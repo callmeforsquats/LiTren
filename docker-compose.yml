@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: litren-db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - litren-network
+    restart: unless-stopped
+
+
+  backend:
+    build: ./backend
+    container_name: litren-backend
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENABLE_ML=${ENABLE_ML}
+      - DB_SEED=${DB_SEED}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - ACCESS_TOKEN_MINUTES=${ACCESS_TOKEN_MINUTES}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+    volumes:
+      - ./backend/media:/app/media
+    ports:
+      - "${API_PORT}:8000"
+    depends_on:
+      - db
+    networks:
+      - litren-network
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: litren-frontend
+    environment:
+      - API_BASE_URL=/api
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      - backend
+    networks:
+      - litren-network
+    restart: unless-stopped
+
+networks:
+  litren-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

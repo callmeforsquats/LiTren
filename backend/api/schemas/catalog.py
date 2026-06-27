@@ -75,12 +75,19 @@ class PubInfo(PubRead):
     pass
 
 
+# --- Bindinds
+class BindingRead(BaseModel):
+    id: int
+    name: str
+
+
 # --- Books ---
 
 
 class BookBase(BaseModel):
+    cat_id: int | None = None
     title: str | None = None
-    price: str | None = None
+    price: float | None = None
     isbn: str | None = None
     is_new: bool | None = None
     is_bestseller: bool | None = None
@@ -116,7 +123,7 @@ class BookInfo(BookRead):
     isbn: str | None = None
     page_count: int | None = None
     annotation: str | None = None
-    binding: str | None = None
+    binding: BindingRead | None = None
     pub: PubRead | None = None
     authors: list[AuthorRead] | None = None
     cat: CatRead | None = None

@@ -2,7 +2,9 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from api.core.config import settings
 
 # ------ Users ------
 
@@ -21,6 +23,10 @@ class UserInfo(BaseModel):
     email: str
     picture_url: str | None = None
     created_at: datetime
+
+    @computed_field
+    def is_admin(self) -> bool:
+        return self.email == settings.ADMIN_EMAIL
 
 
 # ------- Towns ---------
@@ -115,15 +121,10 @@ class ReviewRead(BaseModel):
     text: str | None = None
 
 
-class ReviewInfo(ReviewRead):
-    text: str | None = None
-
-
 class ReviewFilter(BaseModel):
-    book_id: int | None = None
     user_id: int | None = None
-    limit: int | None = Field(None, gt=0, lt=10_000)
-    offset: int = Field(0, ge=0, lt=10_000)
+    limit: int = 10
+    offset: int = 0
     good_first: bool = False
     bad_first: bool = False
 
@@ -135,5 +136,5 @@ class OrderFilter(BaseModel):
     min_price: float | None = Field(None, ge=0)
     max_price: float | None = Field(None, gt=0)
     status: Status | None = None
-    limit: int | None = Field(None, gt=0, lt=1000)
-    offset: int = Field(0, ge=0, lt=10_000)
+    limit: int = 10
+    offset: int = 0

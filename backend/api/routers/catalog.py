@@ -1,10 +1,13 @@
 from api.core.deps import check_admin, get_catalog_repo, get_user_repo
+from api.core.ml import get_books_with_ml
 from api.repos.catalog import CatalogRepo
 from api.repos.users import UserRepo
 from api.schemas.catalog import (
     AuthorCreate,
     AuthorInfo,
+    AuthorRead,
     AuthorUpdate,
+    BindingRead,
     BookCreate,
     BookFilter,
     BookInfo,
@@ -13,6 +16,7 @@ from api.schemas.catalog import (
     CatCreate,
     CatRead,
     PubCreate,
+    PubRead,
     PubUpdate,
     TopicCreate,
     TopicRead,
@@ -29,6 +33,11 @@ async def get_books_by_filter(
     filter: Annotated[BookFilter, Query()], repo: CatalogRepo = Depends(get_catalog_repo)
 ) -> list[BookRead]:
     return await repo.get_books(filter)
+
+
+@router.get("/books/by_query", response_model=list[BookRead])
+async def get_books_by_query(books: BookRead = Depends(get_books_with_ml)):
+    return books
 
 
 @router.get("/books/{id}", response_model=BookInfo)
@@ -62,14 +71,15 @@ async def update_book(
     admin=Depends(check_admin),
     repo: CatalogRepo = Depends(get_catalog_repo),
 ) -> dict:
+    print(data)
     await repo.update_book(id, data)
     return {"status": "success"}
 
 
-@router.delete("/books/{id}")
+@router.delete("/books/{id}", response_model=dict[str, str])
 async def delete_book(
     id: int, admin=Depends(check_admin), repo: CatalogRepo = Depends(get_catalog_repo)
-) -> dict:
+) -> dict[str, str]:
     await repo.delete_book(id)
     return {"status": "success"}
 
@@ -78,7 +88,7 @@ async def delete_book(
 async def get_book_reviews(
     id: int, filter: Annotated[ReviewFilter, Query()], repo: UserRepo = Depends(get_user_repo)
 ) -> list[ReviewRead]:
-    return await repo.get_reviews(filter)
+    return await repo.get_reviews(filter, book_id=id, with_text=True)
 
 
 @router.get("/cats", response_model=list[CatRead])
@@ -102,11 +112,18 @@ async def delete_cat(
     return {"status": "success"}
 
 
-@router.get("/cats/{cat_id}/topics")
+@router.get("/cats/{cat_id}/topics", response_model=list[TopicRead])
 async def get_cat_topics(
     cat_id: int, repo: CatalogRepo = Depends(get_catalog_repo)
 ) -> list[TopicRead]:
     return await repo.get_topics(cat_id)
+
+
+@router.get("/cats/{cat_id}/authors", response_model=list[AuthorRead])
+async def get_cat_authors(
+    cat_id: int, repo: CatalogRepo = Depends(get_catalog_repo)
+) -> list[AuthorRead]:
+    return await repo.get_authors(cat_id)
 
 
 @router.post("/cats/{cat_id}/topics/{topic_id}")
@@ -152,6 +169,11 @@ async def delete_topic(
     return {"status": "success"}
 
 
+@router.get("/pubs", response_model=list[PubRead])
+async def get_pubs(repo: CatalogRepo = Depends(get_catalog_repo)) -> list[TopicRead]:
+    return await repo.get_pubs()
+
+
 @router.get("/pubs/{id}")
 async def get_pub(id: int, repo: CatalogRepo = Depends(get_catalog_repo)) -> AuthorInfo:
     return await repo.get_pub_by_id(id)
@@ -184,6 +206,11 @@ async def delete_pub(
     return {"status": "success"}
 
 
+@router.get("/authors", response_model=list[AuthorRead])
+async def get_authors(repo: CatalogRepo = Depends(get_catalog_repo)) -> list[AuthorRead]:
+    return await repo.get_authors()
+
+
 @router.get("/authors/{id}")
 async def get_author(id: int, repo: CatalogRepo = Depends(get_catalog_repo)):
     return await repo.get_author_by_id(id)
@@ -213,4 +240,25 @@ async def delete_author(
     id: int, admin=Depends(check_admin), repo: CatalogRepo = Depends(get_catalog_repo)
 ) -> dict:
     await repo.delete_author(id)
+    return {"status": "success"}
+
+
+@router.get("/bindings", response_model=list[BindingRead])
+async def get_bindings(repo: CatalogRepo = Depends(get_catalog_repo)) -> list[str]:
+    return await repo.get_bindings()
+
+
+@router.post("/bindings")
+async def add_binding(
+    name: str, admin=Depends(check_admin), repo: CatalogRepo = Depends(get_catalog_repo)
+) -> dict:
+    await repo.add_binding()
+    return {"status": "success"}
+
+
+@router.delete("/bindings/{id}")
+async def delete_binding(
+    id: int, admin=Depends(check_admin), repo: CatalogRepo = Depends(get_catalog_repo)
+):
+    await repo.delete_binding(id)
     return {"status": "success"}
